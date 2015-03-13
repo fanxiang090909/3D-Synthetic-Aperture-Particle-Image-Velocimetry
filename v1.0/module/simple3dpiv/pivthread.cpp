@@ -1,0 +1,135 @@
+#include "pivthread.h"
+
+#include <QVector>
+#include <QSemaphore>
+#include "pivdata.h"
+#include <iostream>
+
+// Processing modules
+//#include "fftcrosscorrelate.h"
+#include "normalizedcrosscorrelator.h"
+
+PivThread::PivThread(QSemaphore *freePass, QSemaphore *usedPass, QMutex *mutexPass, QVector<PivData*> *dataVectorPass, QList<int> listPass, QObject *parent) : QThread(parent)
+{
+    free = freePass;
+    used = usedPass;
+    mutex = mutexPass;
+    dataVector = dataVectorPass;
+    list = listPass;
+
+    //analysisCreated = false;
+    settingsSet = false;
+    //filedataSet = false;
+    //filter = false;
+
+    abort = false;
+
+}
+
+PivThread::~PivThread()
+{
+    wait();
+    switch(_processor)
+    {
+    case _3DPIV::FFTCorrelator:
+       // delete fftCrossCorrelate;
+        break;
+    case _3DPIV::NCCCorrelator:
+        delete nccCrossCorrelate;
+    default:
+        break;
+    }
+
+    //if (analysisCreated) delete analysis;
+}
+
+void PivThread::setSettings(Settings *settingsPass)
+{
+    settings = settingsPass;
+    _processor = settings->processor();
+    settingsSet = true;
+
+}
+
+/*void PivThread::setFileData(DataContainer *filedataPass)
+{
+    filedata = filedataPass;
+    for (int i = 0; i < list.size(); i++)
+    {
+        filelist.append(filedata->data(list.value(i)));
+    }
+    filedataSet = true;
+}*/
+
+/**
+ *  添加互相关对象实例，以及其他核心步骤类实例
+ */
+void PivThread::initializeProcessor()
+{
+    if (/*filedataSet && */settingsSet)
+    {
+        switch(_processor)
+        {
+        case _3DPIV::FFTCorrelator:
+            //fftCrossCorrelate = new FFTCrossCorrelate(settings,*filedata->gridList());
+            break;
+        case _3DPIV::NCCCorrelator:
+            nccCrossCorrelate = new NormalizedCrossCorrelate(settings, settings->gridList());
+            break;
+        default:
+            break;
+        }
+        //filter = settings->batchFilter();
+        //analysis = new Analysis(settings,filedata);
+        //filterOptions = settings->filterOptions();
+        //analysisCreated = true;
+    }
+}
+
+int PivThread::process()
+{
+    mutex->lock();
+    initializeProcessor();
+    mutex->unlock();
+    start();
+
+    return 0;
+}
+
+void PivThread::stopProcess()
+{
+    abort = true;
+}
+
+void PivThread::run()
+{
+    PivData *pivData;
+
+    int i = 0;
+    // 这个循环以及free和used不明白啥意思，先注释掉
+    //while (i < filelist.size() && !abort)
+    {
+        free->acquire();
+
+        switch(_processor)
+        {
+        case _3DPIV::FFTCorrelator:
+            //pivData = fftCrossCorrelate->operator()(filelist.value(i));
+            break;
+        case _3DPIV::NCCCorrelator:
+            pivData = nccCrossCorrelate->operator()();
+            break;
+        default:
+            break;
+        }
+        // pivData的index和name是指的什么意思
+        //pivData->setIndex(filelist.value(i).index());
+        //pivData->setName(filelist.value(i).imageA());
+        //if (filter) analysis->filterData(pivData,filterOptions);
+
+        dataVector->append(pivData);
+
+        used->release();
+        ++i;
+    }
+}
